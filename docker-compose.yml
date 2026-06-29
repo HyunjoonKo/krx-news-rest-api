@@ -8,9 +8,6 @@ services:
       - DB_PATH=/data/news.db
     volumes:
       - news_db:/data
-    depends_on:
-      redis:
-        condition: service_healthy
     restart: unless-stopped
 
   redis:

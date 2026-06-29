@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 
+import aiosqlite
 from fastapi import APIRouter, HTTPException, Query
 
 from krx_news_api.models.schemas import (
@@ -32,6 +34,9 @@ async def list_news(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_news: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_news")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -53,6 +58,9 @@ async def search_news(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in search_news: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in search_news")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -74,6 +82,9 @@ async def list_news_by_source(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_news_by_source: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_news_by_source")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -98,6 +109,9 @@ async def list_disclosures(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_disclosures: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_disclosures")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -121,6 +135,9 @@ async def list_disclosures_by_ticker(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_disclosures_by_ticker: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_disclosures_by_ticker")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -131,6 +148,9 @@ async def crawler_status():
     """크롤러 상태 확인."""
     try:
         return await db.get_all_crawler_status()
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in crawler_status: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in crawler_status")
         raise HTTPException(status_code=500, detail="Internal server error")

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import sqlite3
 from datetime import datetime
 
 import aiosqlite
@@ -13,7 +14,7 @@ logger = logging.getLogger(__name__)
 
 _conn: aiosqlite.Connection | None = None
 _db_path: str | None = None
-_write_lock = asyncio.Lock()
+_db_lock = asyncio.Lock()
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS articles (
@@ -56,7 +57,7 @@ def set_db_path(path: str) -> None:
 async def get_db() -> aiosqlite.Connection:
     global _conn
     if _conn is None:
-        async with _write_lock:
+        async with _db_lock:
             if _conn is None:
                 path = _db_path or settings.db_path
                 conn = await aiosqlite.connect(path)
@@ -110,7 +111,7 @@ async def insert_articles(source: NewsSource, articles: list[NewsArticle]) -> in
         return 0
     conn = await get_db()
     inserted = 0
-    async with _write_lock:
+    async with _db_lock:
         for a in articles:
             cur = await conn.execute(
                 "INSERT OR IGNORE INTO articles "
@@ -143,32 +144,29 @@ async def _load_article_tickers(conn, ids: list[str]) -> dict[str, list[str]]:
     return out
 
 
-async def _hydrate_tickers(conn, items: list[NewsArticle]) -> None:
-    tmap = await _load_article_tickers(conn, [it.id for it in items])
-    for it in items:
-        it.tickers = tmap.get(it.id, [])
-
-
 async def get_articles(
     source: NewsSource | None, page: int, page_size: int
 ) -> tuple[list[NewsArticle], int]:
     conn = await get_db()
     offset = (page - 1) * page_size
-    if source is not None:
-        sv = source.value
-        total_row = await (await conn.execute(
-            "SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))).fetchone()
-        rows = await conn.execute_fetchall(
-            "SELECT * FROM articles WHERE source=? ORDER BY published_at DESC LIMIT ? OFFSET ?",
-            (sv, page_size, offset))
-    else:
-        total_row = await (await conn.execute("SELECT COUNT(*) c FROM articles")).fetchone()
-        rows = await conn.execute_fetchall(
-            "SELECT * FROM articles ORDER BY published_at DESC LIMIT ? OFFSET ?",
-            (page_size, offset))
-    total = total_row["c"]
-    items = [_row_to_article(r) for r in rows]
-    await _hydrate_tickers(conn, items)
+    async with _db_lock:
+        if source is not None:
+            sv = source.value
+            total_row = await (await conn.execute(
+                "SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))).fetchone()
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM articles WHERE source=? ORDER BY published_at DESC LIMIT ? OFFSET ?",
+                (sv, page_size, offset))
+        else:
+            total_row = await (await conn.execute("SELECT COUNT(*) c FROM articles")).fetchone()
+            rows = await conn.execute_fetchall(
+                "SELECT * FROM articles ORDER BY published_at DESC LIMIT ? OFFSET ?",
+                (page_size, offset))
+        total = total_row["c"]
+        items = [_row_to_article(r) for r in rows]
+        tmap = await _load_article_tickers(conn, [it.id for it in items])
+        for it in items:
+            it.tickers = tmap.get(it.id, [])
     return items, total
 
 
@@ -182,15 +180,18 @@ async def search_articles(query: str, page: int, page_size: int) -> tuple[list[N
     offset = (page - 1) * page_size
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     like = f"%{escaped}%"
-    total_row = await (await conn.execute(
-        "SELECT COUNT(*) c FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'",
-        (like, like))).fetchone()
-    rows = await conn.execute_fetchall(
-        "SELECT * FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
-        "ORDER BY published_at DESC LIMIT ? OFFSET ?",
-        (like, like, page_size, offset))
-    items = [_row_to_article(r) for r in rows]
-    await _hydrate_tickers(conn, items)
+    async with _db_lock:
+        total_row = await (await conn.execute(
+            "SELECT COUNT(*) c FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'",
+            (like, like))).fetchone()
+        rows = await conn.execute_fetchall(
+            "SELECT * FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
+            "ORDER BY published_at DESC LIMIT ? OFFSET ?",
+            (like, like, page_size, offset))
+        items = [_row_to_article(r) for r in rows]
+        tmap = await _load_article_tickers(conn, [it.id for it in items])
+        for it in items:
+            it.tickers = tmap.get(it.id, [])
     return items, total_row["c"]
 
 
@@ -213,7 +214,7 @@ async def insert_disclosures(source: NewsSource, disclosures: list[Disclosure]) 
         return 0
     conn = await get_db()
     inserted = 0
-    async with _write_lock:
+    async with _db_lock:
         for d in disclosures:
             cur = await conn.execute(
                 "INSERT OR IGNORE INTO disclosures "
@@ -238,11 +239,12 @@ async def get_disclosures(
     if ticker:
         where.append("ticker=?"); params.append(ticker)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
-    total_row = await (await conn.execute(
-        f"SELECT COUNT(*) c FROM disclosures{clause}", params)).fetchone()
-    rows = await conn.execute_fetchall(
-        f"SELECT * FROM disclosures{clause} ORDER BY published_at DESC LIMIT ? OFFSET ?",
-        (*params, page_size, offset))
+    async with _db_lock:
+        total_row = await (await conn.execute(
+            f"SELECT COUNT(*) c FROM disclosures{clause}", params)).fetchone()
+        rows = await conn.execute_fetchall(
+            f"SELECT * FROM disclosures{clause} ORDER BY published_at DESC LIMIT ? OFFSET ?",
+            (*params, page_size, offset))
     return [_row_to_disclosure(r) for r in rows], total_row["c"]
 
 
@@ -255,7 +257,7 @@ async def update_crawler_status(source: NewsSource, count: int = 0, error: str |
     now = datetime.now().isoformat()
     healthy = 0 if error else 1
     conn = await get_db()
-    async with _write_lock:
+    async with _db_lock:
         await conn.execute(
             "INSERT INTO crawler_status (source,last_crawled_at,articles_count,is_healthy,error) "
             "VALUES (?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
@@ -267,8 +269,26 @@ async def update_crawler_status(source: NewsSource, count: int = 0, error: str |
 
 async def get_all_crawler_status() -> list[CrawlerStatus]:
     conn = await get_db()
-    rows = await conn.execute_fetchall("SELECT * FROM crawler_status")
-    return [CrawlerStatus(
-        source=NewsSource(r["source"]), last_crawled_at=_parse_dt(r["last_crawled_at"]),
-        articles_count=r["articles_count"] or 0, is_healthy=bool(r["is_healthy"]),
-        error=r["error"]) for r in rows]
+    async with _db_lock:
+        rows = await conn.execute_fetchall("SELECT * FROM crawler_status")
+    stored = {r["source"]: r for r in rows}
+    result = []
+    for src in NewsSource:
+        r = stored.get(src.value)
+        if r is not None:
+            result.append(CrawlerStatus(
+                source=src,
+                last_crawled_at=_parse_dt(r["last_crawled_at"]),
+                articles_count=r["articles_count"] or 0,
+                is_healthy=bool(r["is_healthy"]),
+                error=r["error"],
+            ))
+        else:
+            result.append(CrawlerStatus(
+                source=src,
+                last_crawled_at=None,
+                articles_count=0,
+                is_healthy=False,
+                error="Never crawled",
+            ))
+    return result
