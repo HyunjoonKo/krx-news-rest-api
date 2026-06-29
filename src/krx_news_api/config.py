@@ -15,6 +15,8 @@ class Settings(BaseSettings):
     cors_allow_methods: list[str] = ["*"]
     cors_allow_headers: list[str] = ["*"]
 
+    db_path: str = "/data/news.db"
+
     log_level: str = "INFO"
     host: str = "0.0.0.0"
     port: int = 8000
