@@ -7,7 +7,7 @@ from datetime import datetime
 import aiosqlite
 
 from krx_news_api.config import settings
-from krx_news_api.models.schemas import NewsArticle, NewsCategory, NewsSource
+from krx_news_api.models.schemas import Disclosure, NewsArticle, NewsCategory, NewsSource
 
 logger = logging.getLogger(__name__)
 
@@ -187,3 +187,53 @@ async def search_articles(query: str, page: int, page_size: int):
     for it in items:
         it.tickers = tmap.get(it.id, [])
     return items, total_row["c"]
+
+
+# ---------------------------------------------------------------------------
+# Disclosures
+# ---------------------------------------------------------------------------
+
+
+def _row_to_disclosure(r) -> Disclosure:
+    return Disclosure(
+        id=r["id"], source=NewsSource(r["source"]), title=r["title"] or "",
+        url=r["url"] or "", company=r["company"] or "", ticker=r["ticker"] or "",
+        disclosure_type=r["disclosure_type"] or "",
+        published_at=_parse_dt(r["published_at"]) or datetime.now(),
+        collected_at=_parse_dt(r["collected_at"]) or datetime.now())
+
+
+async def insert_disclosures(source: NewsSource, disclosures: list[Disclosure]) -> int:
+    if not disclosures:
+        return 0
+    conn = await get_db()
+    inserted = 0
+    async with _write_lock:
+        for d in disclosures:
+            cur = await conn.execute(
+                "INSERT OR IGNORE INTO disclosures "
+                "(id,source,title,url,company,ticker,disclosure_type,published_at,collected_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?)",
+                (d.id, d.source.value, d.title, d.url, d.company, d.ticker,
+                 d.disclosure_type, d.published_at.isoformat(), d.collected_at.isoformat()))
+            if cur.rowcount:
+                inserted += 1
+        await conn.commit()
+    return inserted
+
+
+async def get_disclosures(source, ticker, page: int, page_size: int):
+    conn = await get_db()
+    offset = (page - 1) * page_size
+    where, params = [], []
+    if source is not None:
+        where.append("source=?"); params.append(source.value if hasattr(source, "value") else source)
+    if ticker:
+        where.append("ticker=?"); params.append(ticker)
+    clause = (" WHERE " + " AND ".join(where)) if where else ""
+    total_row = await (await conn.execute(
+        f"SELECT COUNT(*) c FROM disclosures{clause}", params)).fetchone()
+    rows = await conn.execute_fetchall(
+        f"SELECT * FROM disclosures{clause} ORDER BY published_at DESC LIMIT ? OFFSET ?",
+        (*params, page_size, offset))
+    return [_row_to_disclosure(r) for r in rows], total_row["c"]

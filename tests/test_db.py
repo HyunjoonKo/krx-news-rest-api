@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from krx_news_api.models.schemas import NewsArticle, NewsCategory, NewsSource
+from krx_news_api.models.schemas import Disclosure, NewsArticle, NewsCategory, NewsSource
 from krx_news_api.services import db
 
 
@@ -90,3 +90,37 @@ async def test_search_articles_title_and_content(memdb):
     assert total == 2 and {it.id for it in items} == {a.id, b.id}
     none_items, none_total = await db.search_articles("없는키워드", 1, 50)
     assert none_total == 0 and none_items == []
+
+
+# ---------------------------------------------------------------------------
+# Task 4 helpers
+# ---------------------------------------------------------------------------
+
+
+def _disc(i: int, source=NewsSource.DART, ticker="005930") -> Disclosure:
+    return Disclosure(
+        id=f"{source.value}:{i:012d}", source=source, title=f"d{i}",
+        url=f"https://d/{i}", company="삼성전자", ticker=ticker,
+        disclosure_type="정기공시", published_at=datetime(2026, 6, 30, 9, i % 60),
+        collected_at=datetime(2026, 6, 30, 10, 0))
+
+
+async def test_insert_disclosures_dedup(memdb):
+    d = _disc(1)
+    assert await db.insert_disclosures(NewsSource.DART, [d]) == 1
+    assert await db.insert_disclosures(NewsSource.DART, [d]) == 0
+    items, total = await db.get_disclosures(None, None, 1, 50)
+    assert total == 1
+
+
+async def test_get_disclosures_ticker_filter(memdb):
+    await db.insert_disclosures(NewsSource.DART, [_disc(1, ticker="005930"), _disc(2, ticker="000660")])
+    items, total = await db.get_disclosures(None, "005930", 1, 50)
+    assert total == 1 and items[0].ticker == "005930"
+
+
+async def test_get_disclosures_source_filter_and_paging(memdb):
+    await db.insert_disclosures(NewsSource.DART, [_disc(i) for i in range(4)])
+    await db.insert_disclosures(NewsSource.KIND, [_disc(i, source=NewsSource.KIND) for i in range(2)])
+    dart, total = await db.get_disclosures(NewsSource.DART, None, 1, 3)
+    assert total == 4 and len(dart) == 3
