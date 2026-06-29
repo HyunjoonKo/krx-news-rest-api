@@ -75,3 +75,18 @@ async def test_get_articles_ordered_desc(memdb):
     items, _ = await db.get_articles(None, 1, 50)
     pubs = [it.published_at for it in items]
     assert pubs == sorted(pubs, reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Task 3
+# ---------------------------------------------------------------------------
+
+
+async def test_search_articles_title_and_content(memdb):
+    a = _article(1); a.title = "삼성전자 신고가"; a.content = "내용없음"
+    b = _article(2); b.title = "기타"; b.content = "삼성전자 실적 발표"
+    await db.insert_articles(NewsSource.NAVER, [a, b])
+    items, total = await db.search_articles("삼성전자", 1, 50)
+    assert total == 2 and {it.id for it in items} == {a.id, b.id}
+    none_items, none_total = await db.search_articles("없는키워드", 1, 50)
+    assert none_total == 0 and none_items == []

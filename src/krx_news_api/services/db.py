@@ -164,3 +164,26 @@ async def get_articles(source, page: int, page_size: int):
     for it in items:
         it.tickers = tmap.get(it.id, [])
     return items, total
+
+
+# ---------------------------------------------------------------------------
+# Search
+# ---------------------------------------------------------------------------
+
+
+async def search_articles(query: str, page: int, page_size: int):
+    conn = await get_db()
+    offset = (page - 1) * page_size
+    like = f"%{query}%"
+    total_row = await (await conn.execute(
+        "SELECT COUNT(*) c FROM articles WHERE title LIKE ? OR content LIKE ?",
+        (like, like))).fetchone()
+    rows = await conn.execute_fetchall(
+        "SELECT * FROM articles WHERE title LIKE ? OR content LIKE ? "
+        "ORDER BY published_at DESC LIMIT ? OFFSET ?",
+        (like, like, page_size, offset))
+    items = [_row_to_article(r) for r in rows]
+    tmap = await _load_article_tickers(conn, [it.id for it in items])
+    for it in items:
+        it.tickers = tmap.get(it.id, [])
+    return items, total_row["c"]
