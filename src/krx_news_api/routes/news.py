@@ -1,21 +1,17 @@
 from __future__ import annotations
 
 import logging
+import sqlite3
 
+import aiosqlite
 from fastapi import APIRouter, HTTPException, Query
-from redis.exceptions import RedisError
 
 from krx_news_api.models.schemas import (
     CrawlerStatus,
     NewsSource,
     PaginatedResponse,
 )
-from krx_news_api.services.cache import (
-    get_all_crawler_status,
-    get_articles,
-    get_disclosures,
-    search_articles,
-)
+from krx_news_api.services import db
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +26,7 @@ async def list_news(
 ):
     """최신 뉴스 목록 조회. 소스별 필터 가능."""
     try:
-        articles, total = await get_articles(source=source, page=page, page_size=page_size)
+        articles, total = await db.get_articles(source=source, page=page, page_size=page_size)
         return PaginatedResponse(
             items=articles,
             total=total,
@@ -38,8 +34,9 @@ async def list_news(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_news: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_news")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -53,7 +50,7 @@ async def search_news(
 ):
     """키워드로 뉴스 검색."""
     try:
-        articles, total = await search_articles(query=q, page=page, page_size=page_size)
+        articles, total = await db.search_articles(query=q, page=page, page_size=page_size)
         return PaginatedResponse(
             items=articles,
             total=total,
@@ -61,8 +58,9 @@ async def search_news(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in search_news: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in search_news")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -76,7 +74,7 @@ async def list_news_by_source(
 ):
     """특정 소스의 뉴스 목록 조회."""
     try:
-        articles, total = await get_articles(source=source, page=page, page_size=page_size)
+        articles, total = await db.get_articles(source=source, page=page, page_size=page_size)
         return PaginatedResponse(
             items=articles,
             total=total,
@@ -84,8 +82,9 @@ async def list_news_by_source(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_news_by_source: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_news_by_source")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -100,7 +99,7 @@ async def list_disclosures(
 ):
     """공시 목록 조회. 소스/종목별 필터 가능."""
     try:
-        disclosures, total = await get_disclosures(
+        disclosures, total = await db.get_disclosures(
             source=source, ticker=ticker, page=page, page_size=page_size
         )
         return PaginatedResponse(
@@ -110,8 +109,9 @@ async def list_disclosures(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_disclosures: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_disclosures")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -125,8 +125,8 @@ async def list_disclosures_by_ticker(
 ):
     """특정 종목의 공시 목록."""
     try:
-        disclosures, total = await get_disclosures(
-            ticker=ticker, page=page, page_size=page_size
+        disclosures, total = await db.get_disclosures(
+            source=None, ticker=ticker, page=page, page_size=page_size
         )
         return PaginatedResponse(
             items=disclosures,
@@ -135,8 +135,9 @@ async def list_disclosures_by_ticker(
             page_size=page_size,
             has_next=(page * page_size) < total,
         )
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in list_disclosures_by_ticker: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in list_disclosures_by_ticker")
         raise HTTPException(status_code=500, detail="Internal server error")
@@ -146,9 +147,10 @@ async def list_disclosures_by_ticker(
 async def crawler_status():
     """크롤러 상태 확인."""
     try:
-        return await get_all_crawler_status()
-    except RedisError:
-        raise HTTPException(status_code=503, detail="Cache service unavailable")
+        return await db.get_all_crawler_status()
+    except (aiosqlite.Error, sqlite3.Error) as e:
+        logger.exception("Storage error in crawler_status: %s", e)
+        raise HTTPException(status_code=503, detail="Storage unavailable")
     except Exception:
         logger.exception("Unexpected error in crawler_status")
         raise HTTPException(status_code=500, detail="Internal server error")

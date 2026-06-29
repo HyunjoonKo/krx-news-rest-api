@@ -2,20 +2,18 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, patch
 
-import fakeredis.aioredis
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from krx_news_api.services import db
+
 
 @pytest.fixture(autouse=True)
-async def mock_redis():
-    fake = fakeredis.aioredis.FakeRedis(decode_responses=True)
-    with (
-        patch("krx_news_api.services.cache.get_redis", return_value=fake),
-        patch("krx_news_api.services.cache._redis", fake),
-    ):
-        yield fake
-    await fake.aclose()
+async def mock_db():
+    db.set_db_path(":memory:")
+    await db.init_db()
+    yield
+    await db.close_db()
 
 
 @pytest.fixture(autouse=True)
