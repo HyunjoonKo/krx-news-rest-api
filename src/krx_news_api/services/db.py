@@ -7,6 +7,7 @@ from datetime import datetime
 import aiosqlite
 
 from krx_news_api.config import settings
+from krx_news_api.models.schemas import NewsArticle, NewsCategory, NewsSource
 
 logger = logging.getLogger(__name__)
 
@@ -86,3 +87,80 @@ def _parse_dt(value):
         return datetime.fromisoformat(value)
     except (TypeError, ValueError):
         return None
+
+
+# ---------------------------------------------------------------------------
+# Articles
+# ---------------------------------------------------------------------------
+
+
+def _row_to_article(r) -> NewsArticle:
+    return NewsArticle(
+        id=r["id"], source=NewsSource(r["source"]),
+        category=NewsCategory(r["category"]) if r["category"] else NewsCategory.MARKET,
+        title=r["title"] or "", url=r["url"] or "", content=r["content"] or "",
+        summary=r["summary"] or "", author=r["author"] or "",
+        tickers=[], published_at=_parse_dt(r["published_at"]) or datetime.now(),
+        collected_at=_parse_dt(r["collected_at"]) or datetime.now(),
+    )
+
+
+async def insert_articles(source: NewsSource, articles: list[NewsArticle]) -> int:
+    if not articles:
+        return 0
+    conn = await get_db()
+    inserted = 0
+    async with _write_lock:
+        for a in articles:
+            cur = await conn.execute(
+                "INSERT OR IGNORE INTO articles "
+                "(id,source,category,title,url,content,summary,author,published_at,collected_at) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?)",
+                (a.id, a.source.value, a.category.value, a.title, a.url, a.content,
+                 a.summary, a.author, a.published_at.isoformat(), a.collected_at.isoformat()),
+            )
+            if cur.rowcount:
+                inserted += 1
+            for t in a.tickers:
+                await conn.execute(
+                    "INSERT OR IGNORE INTO article_tickers (article_id,ticker) VALUES (?,?)",
+                    (a.id, t),
+                )
+        await conn.commit()
+    return inserted
+
+
+async def _load_article_tickers(conn, ids: list[str]) -> dict[str, list[str]]:
+    if not ids:
+        return {}
+    q = ",".join("?" * len(ids))
+    rows = await conn.execute_fetchall(
+        f"SELECT article_id, ticker FROM article_tickers WHERE article_id IN ({q})", ids
+    )
+    out: dict[str, list[str]] = {}
+    for r in rows:
+        out.setdefault(r["article_id"], []).append(r["ticker"])
+    return out
+
+
+async def get_articles(source, page: int, page_size: int):
+    conn = await get_db()
+    offset = (page - 1) * page_size
+    if source is not None:
+        sv = source.value if hasattr(source, "value") else source
+        total_row = await (await conn.execute(
+            "SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))).fetchone()
+        rows = await conn.execute_fetchall(
+            "SELECT * FROM articles WHERE source=? ORDER BY published_at DESC LIMIT ? OFFSET ?",
+            (sv, page_size, offset))
+    else:
+        total_row = await (await conn.execute("SELECT COUNT(*) c FROM articles")).fetchone()
+        rows = await conn.execute_fetchall(
+            "SELECT * FROM articles ORDER BY published_at DESC LIMIT ? OFFSET ?",
+            (page_size, offset))
+    total = total_row["c"]
+    items = [_row_to_article(r) for r in rows]
+    tmap = await _load_article_tickers(conn, [it.id for it in items])
+    for it in items:
+        it.tickers = tmap.get(it.id, [])
+    return items, total
