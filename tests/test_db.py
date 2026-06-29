@@ -4,7 +4,7 @@ from datetime import datetime
 
 import pytest
 
-from krx_news_api.models.schemas import Disclosure, NewsArticle, NewsCategory, NewsSource
+from krx_news_api.models.schemas import CrawlerStatus, Disclosure, NewsArticle, NewsCategory, NewsSource
 from krx_news_api.services import db
 
 
@@ -124,3 +124,17 @@ async def test_get_disclosures_source_filter_and_paging(memdb):
     await db.insert_disclosures(NewsSource.KIND, [_disc(i, source=NewsSource.KIND) for i in range(2)])
     dart, total = await db.get_disclosures(NewsSource.DART, None, 1, 3)
     assert total == 4 and len(dart) == 3
+
+
+# ---------------------------------------------------------------------------
+# Task 5
+# ---------------------------------------------------------------------------
+
+
+async def test_crawler_status_upsert(memdb):
+    await db.update_crawler_status(NewsSource.DART, 5)
+    await db.update_crawler_status(NewsSource.NAVER, error="boom")
+    rows = await db.get_all_crawler_status()
+    by = {r.source: r for r in rows}
+    assert by[NewsSource.DART].articles_count == 5 and by[NewsSource.DART].is_healthy
+    assert by[NewsSource.NAVER].is_healthy is False and by[NewsSource.NAVER].error == "boom"

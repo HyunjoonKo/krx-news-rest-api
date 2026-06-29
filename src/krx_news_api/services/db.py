@@ -7,7 +7,7 @@ from datetime import datetime
 import aiosqlite
 
 from krx_news_api.config import settings
-from krx_news_api.models.schemas import Disclosure, NewsArticle, NewsCategory, NewsSource
+from krx_news_api.models.schemas import CrawlerStatus, Disclosure, NewsArticle, NewsCategory, NewsSource
 
 logger = logging.getLogger(__name__)
 
@@ -237,3 +237,31 @@ async def get_disclosures(source, ticker, page: int, page_size: int):
         f"SELECT * FROM disclosures{clause} ORDER BY published_at DESC LIMIT ? OFFSET ?",
         (*params, page_size, offset))
     return [_row_to_disclosure(r) for r in rows], total_row["c"]
+
+
+# ---------------------------------------------------------------------------
+# Crawler status
+# ---------------------------------------------------------------------------
+
+
+async def update_crawler_status(source: NewsSource, count: int = 0, error: str | None = None) -> None:
+    now = datetime.now().isoformat()
+    healthy = 0 if error else 1
+    conn = await get_db()
+    async with _write_lock:
+        await conn.execute(
+            "INSERT INTO crawler_status (source,last_crawled_at,articles_count,is_healthy,error) "
+            "VALUES (?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
+            "last_crawled_at=excluded.last_crawled_at, articles_count=excluded.articles_count, "
+            "is_healthy=excluded.is_healthy, error=excluded.error",
+            (source.value, now, count, healthy, error))
+        await conn.commit()
+
+
+async def get_all_crawler_status() -> list[CrawlerStatus]:
+    conn = await get_db()
+    rows = await conn.execute_fetchall("SELECT * FROM crawler_status")
+    return [CrawlerStatus(
+        source=NewsSource(r["source"]), last_crawled_at=_parse_dt(r["last_crawled_at"]),
+        articles_count=r["articles_count"] or 0, is_healthy=bool(r["is_healthy"]),
+        error=r["error"]) for r in rows]
