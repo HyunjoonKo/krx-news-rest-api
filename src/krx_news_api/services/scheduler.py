@@ -12,9 +12,9 @@ from krx_news_api.scrapers.hankyung import HankyungScraper
 from krx_news_api.scrapers.kind import KindScraper
 from krx_news_api.scrapers.naver import NaverScraper
 from krx_news_api.scrapers.thebell import TheBellScraper
-from krx_news_api.services.cache import (
-    cache_articles,
-    cache_disclosures,
+from krx_news_api.services.db import (
+    insert_articles,
+    insert_disclosures,
     update_crawler_status,
 )
 
@@ -48,11 +48,11 @@ async def crawl_source(source: NewsSource) -> None:
 
         count = 0
         if articles:
-            count += await cache_articles(source, articles)
+            count += await insert_articles(source, articles)
         if disclosures:
-            count += await cache_disclosures(source, disclosures)
+            count += await insert_disclosures(source, disclosures)
 
-        await update_crawler_status(source, articles_count=count)
+        await update_crawler_status(source, count)
         logger.info("Crawled %s: %d items", source.value, count)
 
     except Exception as e:
