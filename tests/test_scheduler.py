@@ -6,9 +6,7 @@ from unittest.mock import AsyncMock, MagicMock
 import pytest
 
 from krx_news_api.models.schemas import Disclosure, NewsArticle, NewsCategory, NewsSource
-from krx_news_api.services import db
-from krx_news_api.services import scheduler
-
+from krx_news_api.services import db, scheduler
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -2,13 +2,18 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import sqlite3
 from datetime import datetime
 
 import aiosqlite
 
 from krx_news_api.config import settings
-from krx_news_api.models.schemas import CrawlerStatus, Disclosure, NewsArticle, NewsCategory, NewsSource
+from krx_news_api.models.schemas import (
+    CrawlerStatus,
+    Disclosure,
+    NewsArticle,
+    NewsCategory,
+    NewsSource,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -97,11 +102,16 @@ def _parse_dt(value):
 
 def _row_to_article(r) -> NewsArticle:
     return NewsArticle(
-        id=r["id"], source=NewsSource(r["source"]),
+        id=r["id"],
+        source=NewsSource(r["source"]),
         category=NewsCategory(r["category"]) if r["category"] else NewsCategory.MARKET,
-        title=r["title"] or "", url=r["url"] or "", content=r["content"] or "",
-        summary=r["summary"] or "", author=r["author"] or "",
-        tickers=[], published_at=_parse_dt(r["published_at"]) or datetime.now(),
+        title=r["title"] or "",
+        url=r["url"] or "",
+        content=r["content"] or "",
+        summary=r["summary"] or "",
+        author=r["author"] or "",
+        tickers=[],
+        published_at=_parse_dt(r["published_at"]) or datetime.now(),
         collected_at=_parse_dt(r["collected_at"]) or datetime.now(),
     )
 
@@ -117,8 +127,18 @@ async def insert_articles(source: NewsSource, articles: list[NewsArticle]) -> in
                 "INSERT OR IGNORE INTO articles "
                 "(id,source,category,title,url,content,summary,author,published_at,collected_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (a.id, a.source.value, a.category.value, a.title, a.url, a.content,
-                 a.summary, a.author, a.published_at.isoformat(), a.collected_at.isoformat()),
+                (
+                    a.id,
+                    a.source.value,
+                    a.category.value,
+                    a.title,
+                    a.url,
+                    a.content,
+                    a.summary,
+                    a.author,
+                    a.published_at.isoformat(),
+                    a.collected_at.isoformat(),
+                ),
             )
             if cur.rowcount:
                 inserted += 1
@@ -152,16 +172,19 @@ async def get_articles(
     async with _db_lock:
         if source is not None:
             sv = source.value
-            total_row = await (await conn.execute(
-                "SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))).fetchone()
+            total_row = await (
+                await conn.execute("SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))
+            ).fetchone()
             rows = await conn.execute_fetchall(
                 "SELECT * FROM articles WHERE source=? ORDER BY published_at DESC LIMIT ? OFFSET ?",
-                (sv, page_size, offset))
+                (sv, page_size, offset),
+            )
         else:
             total_row = await (await conn.execute("SELECT COUNT(*) c FROM articles")).fetchone()
             rows = await conn.execute_fetchall(
                 "SELECT * FROM articles ORDER BY published_at DESC LIMIT ? OFFSET ?",
-                (page_size, offset))
+                (page_size, offset),
+            )
         total = total_row["c"]
         items = [_row_to_article(r) for r in rows]
         tmap = await _load_article_tickers(conn, [it.id for it in items])
@@ -181,13 +204,18 @@ async def search_articles(query: str, page: int, page_size: int) -> tuple[list[N
     escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
     like = f"%{escaped}%"
     async with _db_lock:
-        total_row = await (await conn.execute(
-            "SELECT COUNT(*) c FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'",
-            (like, like))).fetchone()
+        total_row = await (
+            await conn.execute(
+                "SELECT COUNT(*) c FROM articles "
+                "WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'",
+                (like, like),
+            )
+        ).fetchone()
         rows = await conn.execute_fetchall(
             "SELECT * FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
             "ORDER BY published_at DESC LIMIT ? OFFSET ?",
-            (like, like, page_size, offset))
+            (like, like, page_size, offset),
+        )
         items = [_row_to_article(r) for r in rows]
         tmap = await _load_article_tickers(conn, [it.id for it in items])
         for it in items:
@@ -202,11 +230,16 @@ async def search_articles(query: str, page: int, page_size: int) -> tuple[list[N
 
 def _row_to_disclosure(r) -> Disclosure:
     return Disclosure(
-        id=r["id"], source=NewsSource(r["source"]), title=r["title"] or "",
-        url=r["url"] or "", company=r["company"] or "", ticker=r["ticker"] or "",
+        id=r["id"],
+        source=NewsSource(r["source"]),
+        title=r["title"] or "",
+        url=r["url"] or "",
+        company=r["company"] or "",
+        ticker=r["ticker"] or "",
         disclosure_type=r["disclosure_type"] or "",
         published_at=_parse_dt(r["published_at"]) or datetime.now(),
-        collected_at=_parse_dt(r["collected_at"]) or datetime.now())
+        collected_at=_parse_dt(r["collected_at"]) or datetime.now(),
+    )
 
 
 async def insert_disclosures(source: NewsSource, disclosures: list[Disclosure]) -> int:
@@ -220,8 +253,18 @@ async def insert_disclosures(source: NewsSource, disclosures: list[Disclosure]) 
                 "INSERT OR IGNORE INTO disclosures "
                 "(id,source,title,url,company,ticker,disclosure_type,published_at,collected_at) "
                 "VALUES (?,?,?,?,?,?,?,?,?)",
-                (d.id, d.source.value, d.title, d.url, d.company, d.ticker,
-                 d.disclosure_type, d.published_at.isoformat(), d.collected_at.isoformat()))
+                (
+                    d.id,
+                    d.source.value,
+                    d.title,
+                    d.url,
+                    d.company,
+                    d.ticker,
+                    d.disclosure_type,
+                    d.published_at.isoformat(),
+                    d.collected_at.isoformat(),
+                ),
+            )
             if cur.rowcount:
                 inserted += 1
         await conn.commit()
@@ -235,16 +278,20 @@ async def get_disclosures(
     offset = (page - 1) * page_size
     where, params = [], []
     if source is not None:
-        where.append("source=?"); params.append(source.value)
+        where.append("source=?")
+        params.append(source.value)
     if ticker:
-        where.append("ticker=?"); params.append(ticker)
+        where.append("ticker=?")
+        params.append(ticker)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
     async with _db_lock:
-        total_row = await (await conn.execute(
-            f"SELECT COUNT(*) c FROM disclosures{clause}", params)).fetchone()
+        total_row = await (
+            await conn.execute(f"SELECT COUNT(*) c FROM disclosures{clause}", params)
+        ).fetchone()
         rows = await conn.execute_fetchall(
             f"SELECT * FROM disclosures{clause} ORDER BY published_at DESC LIMIT ? OFFSET ?",
-            (*params, page_size, offset))
+            (*params, page_size, offset),
+        )
     return [_row_to_disclosure(r) for r in rows], total_row["c"]
 
 
@@ -253,7 +300,9 @@ async def get_disclosures(
 # ---------------------------------------------------------------------------
 
 
-async def update_crawler_status(source: NewsSource, count: int = 0, error: str | None = None) -> None:
+async def update_crawler_status(
+    source: NewsSource, count: int = 0, error: str | None = None
+) -> None:
     now = datetime.now().isoformat()
     healthy = 0 if error else 1
     conn = await get_db()
@@ -263,7 +312,8 @@ async def update_crawler_status(source: NewsSource, count: int = 0, error: str |
             "VALUES (?,?,?,?,?) ON CONFLICT(source) DO UPDATE SET "
             "last_crawled_at=excluded.last_crawled_at, articles_count=excluded.articles_count, "
             "is_healthy=excluded.is_healthy, error=excluded.error",
-            (source.value, now, count, healthy, error))
+            (source.value, now, count, healthy, error),
+        )
         await conn.commit()
 
 
@@ -276,19 +326,23 @@ async def get_all_crawler_status() -> list[CrawlerStatus]:
     for src in NewsSource:
         r = stored.get(src.value)
         if r is not None:
-            result.append(CrawlerStatus(
-                source=src,
-                last_crawled_at=_parse_dt(r["last_crawled_at"]),
-                articles_count=r["articles_count"] or 0,
-                is_healthy=bool(r["is_healthy"]),
-                error=r["error"],
-            ))
+            result.append(
+                CrawlerStatus(
+                    source=src,
+                    last_crawled_at=_parse_dt(r["last_crawled_at"]),
+                    articles_count=r["articles_count"] or 0,
+                    is_healthy=bool(r["is_healthy"]),
+                    error=r["error"],
+                )
+            )
         else:
-            result.append(CrawlerStatus(
-                source=src,
-                last_crawled_at=None,
-                articles_count=0,
-                is_healthy=False,
-                error="Never crawled",
-            ))
+            result.append(
+                CrawlerStatus(
+                    source=src,
+                    last_crawled_at=None,
+                    articles_count=0,
+                    is_healthy=False,
+                    error="Never crawled",
+                )
+            )
     return result
