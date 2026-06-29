@@ -92,6 +92,35 @@ async def test_search_articles_title_and_content(memdb):
     assert none_total == 0 and none_items == []
 
 
+async def test_search_articles_like_escape(memdb):
+    """Literal % and _ in query must not act as LIKE wildcards."""
+    a = _article(10); a.title = "실적 100% 달성"; a.content = "내용없음"
+    b = _article(11); b.title = "실적 50 달성"; b.content = "내용없음"
+    await db.insert_articles(NewsSource.NAVER, [a, b])
+    # "100%" should match only the article that literally contains "100%"
+    items, total = await db.search_articles("100%", 1, 50)
+    assert total == 1 and items[0].id == a.id
+    # bare "%" must not act as a SQL wildcard matching all rows;
+    # only the article whose title literally contains "%" should be returned
+    # (the bug would return 2 — both articles — because % matched everything)
+    items2, total2 = await db.search_articles("%", 1, 50)
+    assert total2 == 1 and items2[0].id == a.id
+
+
+async def test_get_articles_page2(memdb):
+    """Page 2 returns a disjoint, correctly-ordered slice."""
+    await db.insert_articles(NewsSource.NAVER, [_article(i) for i in range(5)])
+    page1, total = await db.get_articles(None, 1, 2)
+    page2, _ = await db.get_articles(None, 2, 2)
+    assert total == 5
+    assert len(page1) == 2 and len(page2) == 2
+    ids1 = {it.id for it in page1}
+    ids2 = {it.id for it in page2}
+    assert ids1.isdisjoint(ids2)
+    # All page-1 items must be newer than (or equal to) all page-2 items
+    assert all(p1.published_at >= p2.published_at for p1 in page1 for p2 in page2)
+
+
 # ---------------------------------------------------------------------------
 # Task 4 helpers
 # ---------------------------------------------------------------------------
@@ -138,3 +167,17 @@ async def test_crawler_status_upsert(memdb):
     by = {r.source: r for r in rows}
     assert by[NewsSource.DART].articles_count == 5 and by[NewsSource.DART].is_healthy
     assert by[NewsSource.NAVER].is_healthy is False and by[NewsSource.NAVER].error == "boom"
+
+
+async def test_wal_enabled_file(tmp_path):
+    """WAL mode must actually be set on a real file-backed database."""
+    db.set_db_path(str(tmp_path / "t.db"))
+    await db.init_db()
+    try:
+        conn = await db.get_db()
+        cur = await conn.execute("PRAGMA journal_mode")
+        row = await cur.fetchone()
+        assert row[0] == "wal"
+    finally:
+        await db.close_db()
+        db.set_db_path(":memory:")

@@ -143,11 +143,19 @@ async def _load_article_tickers(conn, ids: list[str]) -> dict[str, list[str]]:
     return out
 
 
-async def get_articles(source, page: int, page_size: int):
+async def _hydrate_tickers(conn, items: list[NewsArticle]) -> None:
+    tmap = await _load_article_tickers(conn, [it.id for it in items])
+    for it in items:
+        it.tickers = tmap.get(it.id, [])
+
+
+async def get_articles(
+    source: NewsSource | None, page: int, page_size: int
+) -> tuple[list[NewsArticle], int]:
     conn = await get_db()
     offset = (page - 1) * page_size
     if source is not None:
-        sv = source.value if hasattr(source, "value") else source
+        sv = source.value
         total_row = await (await conn.execute(
             "SELECT COUNT(*) c FROM articles WHERE source=?", (sv,))).fetchone()
         rows = await conn.execute_fetchall(
@@ -160,9 +168,7 @@ async def get_articles(source, page: int, page_size: int):
             (page_size, offset))
     total = total_row["c"]
     items = [_row_to_article(r) for r in rows]
-    tmap = await _load_article_tickers(conn, [it.id for it in items])
-    for it in items:
-        it.tickers = tmap.get(it.id, [])
+    await _hydrate_tickers(conn, items)
     return items, total
 
 
@@ -171,21 +177,20 @@ async def get_articles(source, page: int, page_size: int):
 # ---------------------------------------------------------------------------
 
 
-async def search_articles(query: str, page: int, page_size: int):
+async def search_articles(query: str, page: int, page_size: int) -> tuple[list[NewsArticle], int]:
     conn = await get_db()
     offset = (page - 1) * page_size
-    like = f"%{query}%"
+    escaped = query.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    like = f"%{escaped}%"
     total_row = await (await conn.execute(
-        "SELECT COUNT(*) c FROM articles WHERE title LIKE ? OR content LIKE ?",
+        "SELECT COUNT(*) c FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\'",
         (like, like))).fetchone()
     rows = await conn.execute_fetchall(
-        "SELECT * FROM articles WHERE title LIKE ? OR content LIKE ? "
+        "SELECT * FROM articles WHERE title LIKE ? ESCAPE '\\' OR content LIKE ? ESCAPE '\\' "
         "ORDER BY published_at DESC LIMIT ? OFFSET ?",
         (like, like, page_size, offset))
     items = [_row_to_article(r) for r in rows]
-    tmap = await _load_article_tickers(conn, [it.id for it in items])
-    for it in items:
-        it.tickers = tmap.get(it.id, [])
+    await _hydrate_tickers(conn, items)
     return items, total_row["c"]
 
 
@@ -222,12 +227,14 @@ async def insert_disclosures(source: NewsSource, disclosures: list[Disclosure]) 
     return inserted
 
 
-async def get_disclosures(source, ticker, page: int, page_size: int):
+async def get_disclosures(
+    source: NewsSource | None, ticker: str | None, page: int, page_size: int
+) -> tuple[list[Disclosure], int]:
     conn = await get_db()
     offset = (page - 1) * page_size
     where, params = [], []
     if source is not None:
-        where.append("source=?"); params.append(source.value if hasattr(source, "value") else source)
+        where.append("source=?"); params.append(source.value)
     if ticker:
         where.append("ticker=?"); params.append(ticker)
     clause = (" WHERE " + " AND ".join(where)) if where else ""
