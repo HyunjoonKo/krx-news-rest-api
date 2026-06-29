@@ -13,6 +13,7 @@ from starlette.requests import Request
 
 from krx_news_api.config import settings
 from krx_news_api.routes.news import router as news_router
+from krx_news_api.services import db
 from krx_news_api.services.cache import close_redis
 from krx_news_api.services.scheduler import (
     crawl_all_disclosures,
@@ -32,6 +33,8 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting KRX News API")
 
+    await db.init_db()
+
     # Run initial crawl at startup
     asyncio.create_task(crawl_all_disclosures())
     asyncio.create_task(crawl_all_news())
@@ -41,6 +44,7 @@ async def lifespan(app: FastAPI):
     yield
 
     stop_scheduler()
+    await db.close_db()
     await close_redis()
     logger.info("KRX News API stopped")
 
