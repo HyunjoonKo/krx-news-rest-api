@@ -4,6 +4,10 @@ services:
     ports:
       - "8000:8000"
     env_file: .env
+    environment:
+      - DB_PATH=/data/news.db
+    volumes:
+      - news_db:/data
     depends_on:
       redis:
         condition: service_healthy
@@ -24,3 +28,4 @@ services:
 
 volumes:
   redis_data:
+  news_db:
